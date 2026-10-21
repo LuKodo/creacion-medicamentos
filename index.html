@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Maestro de Medicamentos · Pharmaser</title>
+  <link rel="icon" type="image/png" href="assets/icono.png">
+  <link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+  <!-- Ingreso: formulario a la izquierda, panel de marca a la derecha (fase 10) -->
+  <main id="vista-login" class="login" hidden>
+    <div class="login-marco">
+      <section class="login-lado">
+        <img src="assets/logo.png" alt="Pharmaser" class="logo-login">
+        <form id="form-login" class="login-form" autocomplete="on">
+          <div>
+            <h2 class="login-h">Inicia sesión</h2>
+            <p class="nota">Ingresa con tu usuario del Maestro de Medicamentos</p>
+          </div>
+          <label>Usuario
+            <span class="campo-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><input name="usuario" autocomplete="username" placeholder="Ingresa tu usuario" required autofocus></span>
+          </label>
+          <label>Contraseña
+            <span class="campo-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><input name="clave" id="login-clave" type="password" autocomplete="current-password" placeholder="Ingresa tu contraseña" required>
+              <button type="button" class="ver-clave" id="ver-clave" aria-label="Mostrar contraseña" title="Mostrar contraseña"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button></span>
+          </label>
+          <p class="error" id="login-error" role="alert"></p>
+          <button class="btn primario login-entrar" type="submit">Ingresar</button>
+          <p class="login-seguro"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Acceso seguro para usuarios autorizados</p>
+          <p class="nota" id="login-modo"></p>
+        </form>
+      </section>
+      <section class="login-panel" aria-hidden="true">
+        <div class="login-panel-texto">
+          <h2>Maestro de Medicamentos</h2>
+          <p class="login-lema">Mejoramos tu salud, entregando calidad</p>
+          <ul class="login-beneficios">
+            <li><span class="beneficio-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="8.5" width="19" height="7" rx="3.5" transform="rotate(-45 12 12)"/><path d="M8.5 8.5l7 7"/></svg></span><div><strong>Gestión de productos</strong><small>Información actualizada y centralizada</small></div></li>
+            <li><span class="beneficio-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span><div><strong>Validación de tarifas</strong><small>Contratos y listados integrados</small></div></li>
+            <li><span class="beneficio-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 16v-4M12 16V8M17 16v-7"/></svg></span><div><strong>Control y trazabilidad</strong><small>Procesos seguros y confiables</small></div></li>
+            <li><span class="beneficio-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span><div><strong>Apoyo a la operación</strong><small>Para una mejor atención en salud</small></div></li>
+          </ul>
+        </div>
+        <div class="login-maqueta">
+          <div class="maq-menu"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="maq-cuerpo">
+            <div class="maq-barra"></div>
+            <div class="maq-kpis"><b></b><b></b><b></b></div>
+            <div class="maq-tabla"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Aplicación -->
+  <div id="vista-app" class="app" hidden>
+    <aside class="menu" id="menu">
+      <div class="marca-app"><img src="assets/logo-claro.png" alt="Pharmaser" class="logo-menu"><span>Maestro de Medicamentos</span></div>
+      <nav id="nav"></nav>
+      <div class="menu-pie"><span id="version"></span></div>
+    </aside>
+    <div class="contenido">
+      <header class="barra">
+        <button class="btn icono" id="btn-menu" aria-label="Menú">☰</button>
+        <div class="titulos"><div class="titulo-fila"><h1 id="titulo"></h1><span class="chip aviso" id="chip-prueba" hidden>MODO PRUEBA LOCAL</span></div>
+          <p class="subtitulo" id="subtitulo"></p></div>
+        <div class="usuario">
+          <span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></span>
+          <span class="usuario-datos"><span id="usuario-nombre"></span><span class="perfiles" id="usuario-perfiles"></span></span>
+          <button class="btn sec" id="btn-clave" title="Cambiar contraseña"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3"/></svg>Cambiar contraseña</button>
+          <button class="btn sec" id="btn-salir" title="Salir"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></svg>Salir</button>
+        </div>
+      </header>
+      <section id="pagina" class="pagina" tabindex="-1"></section>
+    </div>
+  </div>
+
+  <!-- Diálogo genérico -->
+  <dialog id="dialogo"><form method="dialog" id="dialogo-form"></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

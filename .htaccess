@@ -1,0 +1,12 @@
+# Protección para Apache (servidor de TIC): solo se exponen index.html, api.php y assets/
+Options -Indexes
+<FilesMatch "^(config.*|setup.*|router|actualizar.*|verificar.*|trasladar.*)\.php$|\.(sqlite|txt|md|bat|log|example\.php)$|^\.">
+    Require all denied
+</FilesMatch>
+RedirectMatch 404 (^|/)(data|lib|salidas)(/|$)
+# La interfaz se revalida en cada carga (evita pantallas viejas después de una actualización)
+<IfModule mod_headers.c>
+    <FilesMatch "\.(html|js|css)$">
+        Header set Cache-Control "no-cache"
+    </FilesMatch>
+</IfModule>

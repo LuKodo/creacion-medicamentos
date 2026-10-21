@@ -1,0 +1,2 @@
+# Carpeta privada del aplicativo: nunca se sirve por web (Apache 2.4)
+Require all denied

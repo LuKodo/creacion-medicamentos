@@ -1,0 +1,15 @@
+# Local configuration and test databases
+config.local.php
+config.local.*.php
+*.sqlite
+*.sqlite-*
+data/.local_test
+
+# Generated outputs
+salidas/*
+!salidas/.htaccess
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/
