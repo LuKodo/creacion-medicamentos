@@ -29,6 +29,12 @@ RUN printf '%s\n' \
     && mkdir -p /var/www/html/data /var/www/html/salidas \
     && chown -R www-data:www-data /var/www/html/data /var/www/html/salidas
 
+# Base uploads accept up to 200 MB (see README, "php.ini"); the PHP default is 2 MB.
+RUN printf '%s\n' \
+        'upload_max_filesize = 200M' \
+        'post_max_size = 210M' \
+        > /usr/local/etc/php/conf.d/zz-uploads.ini
+
 WORKDIR /var/www/html
 EXPOSE 80
 ENTRYPOINT ["/usr/local/bin/app-entrypoint"]
