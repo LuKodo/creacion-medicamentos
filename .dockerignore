@@ -31,3 +31,6 @@ salidas/**
 *.swp
 Thumbs.db
 .DS_Store
+
+# Delivered test database (not part of the image)
+base_primera_version/
