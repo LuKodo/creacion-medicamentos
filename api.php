@@ -12,6 +12,7 @@ require_once __DIR__ . '/lib/catalogos_admin.php';
 require_once __DIR__ . '/lib/catalogos_excel.php';
 require_once __DIR__ . '/lib/invima.php';
 require_once __DIR__ . '/lib/nota_tecnica.php';
+require_once __DIR__ . '/lib/nt_publicacion.php';
 require_once __DIR__ . '/lib/solicitudes.php';
 require_once __DIR__ . '/lib/creacion.php';
 require_once __DIR__ . '/lib/correcciones.php';
@@ -402,6 +403,26 @@ $acciones = [
         if (!$conPrecios) $r['filas'] = array_map('nt_sin_precios', $r['filas']);
         return $r + ['con_precios' => $conPrecios, 'puede_gestionar' => in_array('NT.GESTIONAR', $permisos, true), 'puede_descargar' => in_array('NT.DESCARGAR', $permisos, true),
                'porcentaje_precio' => (float) parametro('NT_PORCENTAJE_PRECIO', '20'), 'anio_precio' => parametro('NT_ANIO_PRECIO', '2026')];
+    }],
+    // Publicación para sistemas externos (llave de API en X-API-Key, sin sesión): nt_version indica si algo cambió; nt_snapshot entrega todo lo calculado.
+    'nt_version' => ['GET', function () {
+        requerir_llave_publicacion();
+        return nt_version_datos(db());
+    }],
+    'nt_snapshot' => ['GET', function () {
+        requerir_llave_publicacion();
+        $v = nt_version_datos(db()); // antes de calcular: si algo cambia durante el cálculo, la siguiente consulta de nt_version lo detecta
+        $pub = nt_filas_publicables(db());
+        $conPrecios = app_config()['publicacion_con_precios'] === '1';
+        $filas = $conPrecios ? $pub['filas'] : array_map('nt_sin_precios', $pub['filas']);
+        $json = json_encode(['version' => $v['version'], 'generado_en' => ahora(), 'total' => count($filas), 'con_precios' => $conPrecios,
+                             'bases_faltantes' => $pub['bases_faltantes'], 'filas' => $filas], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        auditar(null, 'NT_SNAPSHOT', 'nt_item', null, null, ['version' => $v['version'], 'filas' => count($filas), 'con_precios' => $conPrecios, 'via' => 'llave_api']);
+        header('Vary: Accept-Encoding');
+        if (str_contains((string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? ''), 'gzip')) { $json = gzencode($json, 6); header('Content-Encoding: gzip'); }
+        header('Content-Length: ' . strlen($json));
+        echo $json;
+        exit;
     }],
     'nt_precio_uno' => ['GET', function () {
         requerir_precios(requerir_permiso('NT.CONSULTAR'));
@@ -1026,8 +1047,8 @@ $acciones = [
 
 // ------------------------------------------------------------------ despacho
 try {
-    iniciar_sesion_php();
     $nombre = $_GET['accion'] ?? '';
+    if (!in_array($nombre, ACCIONES_CON_LLAVE, true)) iniciar_sesion_php(); // las acciones con llave de API no usan sesión ni cookies
     if (!isset($acciones[$nombre])) throw new ErrorApi('Acción no encontrada.', 404);
     [$metodo, $fn] = $acciones[$nombre];
     if ($_SERVER['REQUEST_METHOD'] !== $metodo) throw new ErrorApi('Método no permitido.', 405);

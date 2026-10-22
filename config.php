@@ -58,6 +58,10 @@ function app_config(): array {
         'sesion_minutos' => (int) $env('CI_SESION_MINUTOS', 60),
         // PHP de consola para las actualizaciones en segundo plano (INVIMA, Mutual). En el servidor PHP_BINARY es el de la web.
         'php_cli' => $env('CI_PHP_CLI', ''),
+        // Publicación a sistemas externos (nt_version / nt_snapshot): llaves de API separadas por coma (mínimo 32 caracteres cada una).
+        'publicacion_llaves' => $env('CI_PUBLICACION_API_KEYS', ''),
+        // '1' = nt_snapshot incluye precios y tarifas; por defecto salen en null.
+        'publicacion_con_precios' => $env('CI_PUBLICACION_CON_PRECIOS', '0'),
     ];
     return $cfg;
 }

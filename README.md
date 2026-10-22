@@ -78,6 +78,38 @@ cambia) y **calculadora de precio** (cápita, o compra + `NT_PORCENTAJE_PRECIO` 
 usuarios de prueba, credenciales), consistencia de catálogos y estado de las bases. Sale con código 1
 si hay errores. Ejecutarlo después de cada despliegue.
 
+## Publicación de la Maestra Tarifaria para sistemas externos
+Otros sistemas no deben recalcular la Maestra Tarifaria: consultan estos dos endpoints con una **llave de API** (sin sesión ni cookies).
+
+| Acción | Respuesta |
+|---|---|
+| `GET api.php?accion=nt_version` | `{"version": "<sha256>", "items": <líneas en nt_item>, "cargas": {"<BASE>": <id de la carga vigente>, ...}}` |
+| `GET api.php?accion=nt_snapshot` | `{"version", "generado_en", "total", "con_precios", "bases_faltantes", "filas": [...]}` |
+
+```sh
+curl -H 'X-API-Key: <llave>' 'https://HOST/api.php?accion=nt_version'
+curl -H 'X-API-Key: <llave>' -H 'Accept-Encoding: gzip' --compressed 'https://HOST/api.php?accion=nt_snapshot'
+```
+
+**Llave de API**
+- Se envía solo en la cabecera `X-API-Key` (nunca en la URL). Se configura en la variable de entorno `CI_PUBLICACION_API_KEYS`
+  (o en `config.local.php`): una o varias llaves separadas por coma, de **mínimo 32 caracteres** (las más cortas se ignoran).
+  Con dos llaves a la vez se puede rotar sin corte. Genere una con `openssl rand -hex 32`.
+- Sin llaves configuradas, ambas acciones responden 503; con una llave ausente o incorrecta, 401.
+- La llave da acceso a **todas** las líneas de la Maestra Tarifaria. Los precios y tarifas llegan en `null` (`con_precios: false`)
+  salvo que `CI_PUBLICACION_CON_PRECIOS=1`. Trate la llave como una contraseña de base de datos y restrinja el origen en la red.
+- Estas dos acciones no abren sesión. Cada `nt_snapshot` queda en auditoría como `NT_SNAPSHOT` (`via: llave_api`); los intentos con
+  llave inválida se registran en el log del servidor.
+
+**Comportamiento**
+- `nt_version` es barata (no calcula): consúltela cada 30-60 s. La huella cambia si cambia una línea de `nt_item`, un catálogo
+  (`cat_molecula`, `cat_subplan`, `cat_grupo_impositivo`), una regla (`proc_regla`) o la carga vigente de una base. No detecta
+  cambios hechos dentro de una carga ya creada (se asume que no se editan).
+- `nt_snapshot` calcula una vez con `nt_calcular` y entrega todas las filas con la misma forma que `nt_listar` (una fila por línea
+  y PLU, con `estado`, `reglas` y `motivos`). Con `Accept-Encoding: gzip` responde comprimido.
+- `version` de `nt_snapshot` se calcula **antes** del cálculo: si algo cambia durante el cálculo, la siguiente consulta de
+  `nt_version` ya será distinta y el cliente volverá a pedir el snapshot.
+
 ## Paso a producción (TIC)
 1. Crear la base `creacion_items` (utf8mb4, `utf8mb4_unicode_ci`) y un usuario MySQL con permisos **solo** sobre ella:
    SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES (no usar la cuenta `admin`).
