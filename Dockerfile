@@ -31,8 +31,8 @@ RUN printf '%s\n' \
 
 # Base uploads accept up to 200 MB (see README, "php.ini"); the PHP default is 2 MB.
 RUN printf '%s\n' \
-        'upload_max_filesize = 200M' \
-        'post_max_size = 210M' \
+        'upload_max_filesize = 300M' \
+        'post_max_size = 310M' \
         > /usr/local/etc/php/conf.d/zz-uploads.ini
 
 WORKDIR /var/www/html
