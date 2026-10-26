@@ -52,7 +52,8 @@ function cor_calcular_siesa(PDO $pdo): array {
     $carga = _carga_vigente($pdo, 'MAESTRO_SIESA');
     if (!$carga) throw new ErrorApi('No hay Maestro SIESA cargado en Bases de referencia.', 422);
     $mt = [];
-    foreach ($pdo->query('SELECT cum_facturar, contrato, cum, cod_auf, cod_mutual, iva, tipo_producto, activo FROM nt_item') as $r) $mt[_u($r['cum_facturar'])][] = $r;
+    foreach ($pdo->query('SELECT id, cum_facturar, contrato, cum, cod_auf, cod_mutual, iva, tipo_producto, activo FROM nt_item ORDER BY id') as $r) $mt[_u($r['cum_facturar'])][] = $r;
+    $plusInactivos = nt_plus_inactivos($pdo); // estado por PLU + CONTRATO en la Maestra Tarifaria
     $siesa = [];
     $st = $pdo->prepare('SELECT item, referencia, cum, registro_sanitario, cod_gen_audifarma, id_mutual, codigo_generico_auxiliar, grupo_impositivo, estado, tipo_medicamento
                          FROM ref_siesa_item WHERE carga_id = ? AND cum IN (SELECT cum_facturar FROM nt_item) ORDER BY id');
@@ -110,6 +111,11 @@ function cor_calcular_siesa(PDO $pdo): array {
         };
         foreach ($items as $plu => $i) {
             $siesaActivo = _u($i['estado']) === 'ACTIVO';
+            // PLU inactivo en la Maestra Tarifaria en todas las líneas activas del CUM (estado por PLU + CONTRATO): se inactiva en SIESA
+            if ($activas && !array_filter($activas, fn($l) => !isset($plusInactivos[(int) $l['id']][$plu]))) {
+                if ($siesaActivo) $add('ESTADO', $plu, $i['item'], 'Activo', 'Inactivo', 'Inactivar el PLU en SIESA (el PLU está inactivo en la Maestra Tarifaria)');
+                continue;
+            }
             // línea activa: el PLU debe estar activo (si ninguno lo está, se activa el principal); línea inactiva: cada PLU activo se inactiva
             if (($activo ? $plu === $principal : $siesaActivo) && $siesaActivo !== $activo) {
                 $add('ESTADO', $plu, $i['item'], ucfirst(mb_strtolower((string) $i['estado'])), $activo ? 'Activo' : 'Inactivo',
@@ -212,10 +218,12 @@ function cor_calcular_medicar(PDO $pdo): array {
         if (trim((string) $r['opcion']) === '1') $medCum[_u($r['cum'])][$p] = true; // PLU activos de MEDICAR por CUM
     }
     $invima = _cor_invima($pdo);
+    $plusInactivos = nt_plus_inactivos($pdo); // estado por PLU + CONTRATO en la Maestra Tarifaria
     $out = [];
     foreach (nt_calcular($pdo)['filas'] as $l) {
         $cf = (string) $l['cum_facturar']; $cum = _u($cf);
-        $activo = (int) $l['activo'] === 1;
+        $activoLinea = (int) $l['activo'] === 1;
+        $activo = $activoLinea;
         $sp = (string) ($l['subplan'] ?? '');
         $contrato = (string) $l['contrato_vista'];
         $exento = $l['tipo_producto'] === '799' || _u($l['cum']) === 'VITAL NO DISPONIBLE'; // insumos y vitales: varios PLU y sin CUM en MEDICAR
@@ -243,6 +251,7 @@ function cor_calcular_medicar(PDO $pdo): array {
         }
         $variosSiesa = !$exento && count(array_filter($enSiesa)) > 1; // varios PLU activos en SIESA (NT29): primero se define en SIESA cuál queda
         foreach ($plus as $p) {
+            $activo = $activoLinea && !isset($plusInactivos[(int) $l['id']][$p]); // PLU inactivo en este contrato: se inactiva en su subplán
             $filas = $medPlu[$p] ?? null;
             if (!$filas) { if ($activo) $add('PLU', $p, null, $p, "Crear en MEDICAR el PLU $p (CUM $cf) en el subplán $sp"); continue; }
             // todo lo que está en el Contrato Evento debe estar activo en MEDICAR en TRANSFERENCIA DE PENDIENTES (decisión del usuario, 2026-10-19)

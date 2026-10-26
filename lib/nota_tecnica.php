@@ -91,6 +91,20 @@ function _u(?string $v): string { return mb_strtoupper(trim((string) $v)); }
  * Motor de la Maestra Tarifaria: todas las filas con sus columnas calculadas, estado y motivos.
  * Una consulta por base (por conjunto), no fila por fila. Se calcula una vez por solicitud.
  */
+/**
+ * Peso entero hacia abajo (decisión del usuario, 2026-10-26): un precio que sale de la tarifa de cápita o del precio regulado nunca se
+ * redondea hacia arriba (807,89 → 807; regulado 2.820,80 → 2.820), así el precio facturado no supera el tope. El margen evita que un
+ * valor como 806,9999999 (por los decimales del cálculo) baje un peso.
+ */
+function _nt_peso(float $v): float { return floor($v + 1e-6); }
+
+/** PLU inactivos en una línea activa (estado por PLU + CONTRATO, 2026-10-26): [id de la línea => [PLU => true]]. */
+function nt_plus_inactivos(PDO $pdo): array {
+    $r = [];
+    foreach ($pdo->query('SELECT nt_item_id, plu FROM nt_item_plu WHERE activo = 0 ORDER BY id') as $x) $r[(int) $x['nt_item_id']][_u($x['plu'])] = true;
+    return $r;
+}
+
 function nt_calcular(PDO $pdo, bool $refrescar = false): array {
     static $cache = null;
     if ($cache !== null && !$refrescar) return $cache; // $refrescar: después de cambiar la Maestra Tarifaria en la misma solicitud
@@ -199,18 +213,19 @@ function nt_calcular(PDO $pdo, bool $refrescar = false): array {
         $d = (string) $it['cum_facturar'];
         // COD GEN SIESA: el digitado (como las tablas dinámicas del Excel); si falta, el del Maestro SIESA.
         $it['_h'] = (string) $it['cod_gen_siesa'] !== '' ? (string) $it['cod_gen_siesa'] : (string) (array_key_first($siesa[$d]['h'] ?? []) ?? '');
-        // 7F (D-E1, D-E6; regla confirmada por el usuario): el precio sale de la fuente de la línea —Listado Cápita (CAPITA) o Contrato
-        // Evento (EVENTO y EVENTO SAS)—, que ya trae el IVA, y nunca supera el precio regulado del COD AUF. El precio de venta (sin IVA)
-        // se calcula y deja de digitarse; sin fuente (no está en el contrato / listado) se usa el digitado.
-        $tipoIt = in_array((string) $it['tipo_producto'], ['714', '799'], true) ? (string) $it['tipo_producto'] : nt_tipo_producto($d);
-        $fuente = $it['contrato'] === 'CAPITA' ? ($capita[_u($it['cod_auf'])]['tarifa'] ?? null) : ($contrato[_u($it['cod_mutual'])][$tipoIt][0] ?? null);
-        $it['fuente_precio'] = $fuente === null ? 'DIGITADO' : ($it['contrato'] === 'CAPITA' ? 'LISTADO CAPITA' : 'CONTRATO EVENTO');
+        // 7F (D-E1, D-E6): en CAPITA el precio sale del Listado Cápita (tarifa pactada, ya trae el IVA) y nunca supera el precio
+        // regulado del COD AUF; el precio de venta (sin IVA) se calcula y deja de digitarse. En EVENTO y EVENTO SAS se conserva el
+        // PRECIO DE VENTA propio de la línea y el Contrato Evento es solo el tope: si el precio M lo supera, GLOSA TARIFA (NT02), como
+        // en el Excel (decisión del usuario, 2026-10-26: p.ej. M03100 se queda en 111.600 aunque el contrato pague 117.180).
+        $fuente = $it['contrato'] === 'CAPITA' ? ($capita[_u($it['cod_auf'])]['tarifa'] ?? null) : null;
+        $it['fuente_precio'] = $fuente === null ? 'DIGITADO' : 'LISTADO CAPITA';
         $regIt = $regulado[_u($it['cod_auf'])] ?? null;
-        if ($fuente !== null && $regIt !== null && $fuente > round($regIt) + 0.5) { $fuente = round($regIt); $it['fuente_precio'] = 'PRECIO REGULADO'; }
+        if ($fuente !== null && $regIt !== null && _nt_peso($fuente) > _nt_peso($regIt)) { $fuente = $regIt; $it['fuente_precio'] = 'PRECIO REGULADO'; }
+        if ($fuente !== null) $fuente = _nt_peso((float) $fuente); // peso entero hacia abajo
         $it['precio_digitado'] = $it['precio_venta'];
-        $it['precio_aplica'] = $fuente === null ? null : round((float) $fuente);
-        if ($fuente !== null) $it['precio_venta'] = round((float) $fuente / (1 + (float) $it['iva']), 2);
-        $it['_p'] = $fuente !== null ? round((float) $fuente) : ($it['precio_venta'] === null ? null : round((float) $it['precio_venta'] * (1 + (float) $it['iva'])));
+        $it['precio_aplica'] = $fuente;
+        if ($fuente !== null) $it['precio_venta'] = round($fuente / (1 + (float) $it['iva']), 2);
+        $it['_p'] = $fuente !== null ? $fuente : ($it['precio_venta'] === null ? null : round((float) $it['precio_venta'] * (1 + (float) $it['iva'])));
         if (!(int) $it['activo']) continue;
         $j = _u($it['cod_mutual']);
         // ¿PRECIO CORRECTO- M?: el mayor precio final dentro del mismo contrato, agrupado por COD MUTUAL en EVENTO /
@@ -227,6 +242,7 @@ function nt_calcular(PDO $pdo, bool $refrescar = false): array {
     unset($it);
 
     $inactivasNt = reglas_inactivas($pdo);                // una regla inactiva no se aplica
+    $plusInactivos = nt_plus_inactivos($pdo);              // estado por PLU + CONTRATO
     $personalizadasNt = reglas_personalizadas($pdo, 'NT');  // reglas creadas por el Administrador
     // --- segunda pasada: columnas calculadas y reglas por fila
     $filas = [];
@@ -252,7 +268,7 @@ function nt_calcular(PDO $pdo, bool $refrescar = false): array {
         // Si el precio M del grupo supera el precio regulado del COD AUF de la línea, la línea conserva su propio
         // precio (PRECIO DE VENTA 2026 + IVA), como en el Excel original (decisión del usuario, 2026-09-29).
         $regLinea = $regulado[$e] ?? null;
-        $mPorRegulado = $regLinea !== null && $v !== null && $p !== null && $v > round($regLinea) && $p < $v;
+        $mPorRegulado = $regLinea !== null && $v !== null && $p !== null && $v > _nt_peso($regLinea) && $p < $v;
         if ($mPorRegulado) $v = $p;
         $m = [];
         $motivo = function (string $codigo, string $nivel, string $texto) use (&$m) { $m[] = ['codigo' => $codigo, 'nivel' => $nivel, 'texto' => $texto]; };
@@ -284,7 +300,7 @@ function nt_calcular(PDO $pdo, bool $refrescar = false): array {
         else $cumCodigo = '(ERROR)CUM NO ENLAZADO CON ESE COD';
 
         // Precio regulado: el ¿PRECIO CORRECTO- M? (precio máximo del COD MUTUAL) no puede superarlo.
-        $topeReg = $reg !== null ? round($reg) : null;
+        $topeReg = $reg !== null ? _nt_peso($reg) : null; // el precio entero máximo que no supera el regulado
         $cumpleRegulado = $topeReg === null ? 'NO REGULADO' : ($v === null || $v <= $topeReg ? 'SI' : 'NO');
         // Cápita: el ¿PRECIO CORRECTO- M? debe ser igual a la tarifa pactada del Listado Cápita (una diferencia solo
         // de decimales, p.ej. 807 frente a 807,89, es correcta: decisión del usuario), y la tarifa no puede superar el regulado.
@@ -292,7 +308,7 @@ function nt_calcular(PDO $pdo, bool $refrescar = false): array {
         $tarifaCapita = $cap['tarifa'] ?? null;
         // Si la tarifa supera el precio regulado, lo correcto es facturar el regulado: el precio facturado nunca puede
         // superar el regulado (decisión del usuario, 2026-09-29), así que precio M = regulado también es correcto.
-        $tarifaSobreRegulado = $cap !== null && $topeReg !== null && $tarifaCapita > $topeReg + 0.5;
+        $tarifaSobreRegulado = $cap !== null && $topeReg !== null && _nt_peso($tarifaCapita) > $topeReg;
         $precioCapitaOk = $cap === null ? 'NO APLICA' : ($v !== null && abs($v - $tarifaCapita) < 1 ? 'SI'
             : ($tarifaSobreRegulado && $v !== null && abs($v - $topeReg) < 1 ? 'SI: PRECIO REGULADO' : 'NO'));
         // Columnas unificadas (decisión del usuario): «¿esta en el contrato?», «¿el precio es correcto?» y «PRECIO
@@ -341,7 +357,7 @@ function nt_calcular(PDO $pdo, bool $refrescar = false): array {
             if ($cap !== null && $cap['id'] !== '' && $cap['id'] !== $j) $motivo('NT23', 'ALERTA',
                 "En el Listado Cápita el COD AUF $e tiene ID MUTUAL {$cap['id']} y en la Maestra Tarifaria el COD MUTUAL es " . ($j !== '' ? $j : '(vacío)') . ': corregir el código en la Maestra Tarifaria o en el listado');
             // NT20 solo si el precio M no quedó correcto: si es igual a la tarifa o al regulado, no es error (decisión del usuario, 2026-10-03)
-            if ($cap !== null && $topeReg !== null && $tarifaCapita > $topeReg + 0.5 && $precioCapitaOk === 'NO') $motivo('NT20', 'ERROR', sprintf('La tarifa de cápita %s supera el precio regulado %s',
+            if ($cap !== null && $topeReg !== null && _nt_peso($tarifaCapita) > $topeReg && $precioCapitaOk === 'NO') $motivo('NT20', 'ERROR', sprintf('La tarifa de cápita %s supera el precio regulado %s',
                 number_format($tarifaCapita, 0, ',', '.'), number_format($topeReg, 0, ',', '.')));
             if ($problemaSas !== null) $motivo('NT21', 'ALERTA', $problemaSas);
             if ($cumpleRegulado === 'NO') {
@@ -432,9 +448,16 @@ function nt_calcular(PDO $pdo, bool $refrescar = false): array {
 
         $fila = array_intersect_key($it, array_flip([...NT_CAMPOS, 'id', 'activo', 'origen_precio', 'actualizado_en', 'precio1_aprobado_en', 'cum_validado_en', 'precio_aplica', 'precio_digitado', 'fuente_precio']));
         $porPlu = $siesaLinea['_por_plu'];
-        if (count($porPlu) > 1) foreach ($porPlu as $plu => &$x) $x['plu_medicar'] = _nt_medicar([$plu], $d, $subplanesMed, $medPlu, $medCum)['plu_medicar'];
+        // Un PLU por fila; el activar / inactivar es por PLU + CONTRATO: el PLU inactivo de una línea activa sale INACTIVO en su fila,
+        // sin reglas (la línea se sigue validando con sus demás PLU)
+        if (count($porPlu) > 1) foreach ($porPlu as $plu => &$x) {
+            $x['plu'] = (string) $plu;
+            $x['plu_medicar'] = _nt_medicar([$plu], $d, $subplanesMed, $medPlu, $medCum)['plu_medicar'];
+            if ((int) $it['activo'] && isset($plusInactivos[(int) $it['id']][_u($plu)])) $x += ['activo' => 0, 'estado' => 'INACTIVO', 'motivos' => [], 'reglas' => '', 'plu_inactivo' => true];
+        }
         unset($x, $siesaLinea['_plus'], $siesaLinea['_por_plu']);
-        $filas[] = $fila + $siesaLinea + ['contrato_vista' => nt_contrato_vista($k), 'medicar' => $medLinea['medicar'], 'plu_medicar' => $medLinea['plu_medicar'],
+        $filas[] = $fila + $siesaLinea + ['plu' => count($porPlu) === 1 ? (string) array_key_first($porPlu) : null, 'activo_linea' => (int) $it['activo'],
+            'contrato_vista' => nt_contrato_vista($k), 'medicar' => $medLinea['medicar'], 'plu_medicar' => $medLinea['plu_medicar'],
             'subplan' => $subplanLinea, 'clasificacion' => $subplanLinea !== null ? ($subplanCat[$subplanLinea]['clasificacion'] ?? null) : null] + [
             'tarifa_capita' => $tarifaCapita,
             'precio_capita_ok' => $precioCapitaOk,
@@ -617,8 +640,8 @@ function _nt_filtrar(array $filas, array $filtros, ?string $excluir = null): arr
 /**
  * Líneas que faltan en la Maestra Tarifaria: un producto (CUM a facturar) debe tener una línea por cada contrato donde está:
  *  - CAPITA: su COD AUF está en el Listado Cápita (precio = tarifa pactada, sin IVA);
- *  - EVENTO: su COD MUTUAL está en el Contrato Evento (precio = valor unitario del tipo de la Maestra Tarifaria, sin IVA);
- *  - EVENTO SAS: su CUM (o, si el listado no trae CUM, su COD AUF) está en el Listado EVENTO SAS (precio = el del contrato).
+ *  - EVENTO: su COD MUTUAL está en el Contrato Evento (precio = el del producto, con tope en el valor unitario del contrato);
+ *  - EVENTO SAS: su CUM (o, si el listado no trae CUM, su COD AUF) está en el Listado EVENTO SAS (precio = el del producto, con tope en el contrato).
  * La línea nueva copia los datos de la línea existente del producto (decisión del usuario: precio de la base).
  */
 function nt_lineas_faltantes(PDO $pdo): array {
@@ -661,10 +684,14 @@ function nt_lineas_faltantes(PDO $pdo): array {
             if (isset($existe["$cf|$k"])) continue; // también si existe inactiva: no se vuelve a crear
             $fila = array_intersect_key($base, array_flip(NT_CAMPOS));
             $fila['contrato'] = $k;
-            // Precio de la base; si esa base supera el precio regulado del COD AUF, se copia el PRECIO DE VENTA de la
-            // línea original (decisión del usuario, 2026-09-29).
-            $usaBase = is_float($valor) && !(isset($regulado[$e]) && round($valor) > round($regulado[$e]) && $base['precio_venta'] !== null);
-            $fila['precio_venta'] = $usaBase ? round($valor / (1 + $iva), 2) : $base['precio_venta'];
+            // CAPITA: la tarifa del Listado Cápita; si supera el precio regulado del COD AUF, se copia el PRECIO DE VENTA de la
+            // línea original (decisión del usuario, 2026-09-29). EVENTO / EVENTO SAS: el PRECIO DE VENTA del producto (línea
+            // original), con el contrato como tope (decisión del usuario, 2026-10-26).
+            $propio = $base['precio_venta'] !== null ? (float) $base['precio_venta'] * (1 + $iva) : null;
+            $usaBase = is_float($valor) && ($k === 'CAPITA'
+                ? !(isset($regulado[$e]) && _nt_peso($valor) > _nt_peso($regulado[$e]) && $base['precio_venta'] !== null)
+                : $propio === null || $propio > $valor + 0.5);
+            $fila['precio_venta'] = $usaBase ? round(($k === 'CAPITA' ? _nt_peso($valor) : $valor) / (1 + $iva), 2) : $base['precio_venta'];
             $fila['origen_precio'] = $usaBase ? ($k === 'CAPITA' ? 'LISTADO CAPITA' : 'CONTRATO') : 'COPIA';
             $fila['_desde'] = $base['contrato'];
             $faltan[] = $fila;
@@ -1077,27 +1104,62 @@ function _nt_normalizar(array $d, bool $nuevo): array {
 
 /** Crea o edita una fila de la Maestra Tarifaria (solo Administrador). El CUM a facturar y el CONTRATO no se editan: son la llave. */
 /**
- * Activar / inactivar líneas de forma masiva (pedido del usuario, 2026-10-16): por ids seleccionados o por todas las
- * filas que cumplen los filtros de la tabla. Cada línea queda en auditoría (NT_EDITAR: activo antes / después + motivo).
+ * Activar / inactivar de forma masiva (pedido del usuario, 2026-10-16): por las filas seleccionadas o por todas las filas que
+ * cumplen los filtros de la tabla. Es por PLU + CONTRATO (pedido del usuario, 2026-10-26): cada fila es «id de la línea|PLU».
+ * En una línea con varios PLU se cambia solo ese PLU; la línea queda activa mientras tenga al menos un PLU activo. En una línea
+ * con un solo PLU (o sin PLU) se cambia la línea. Cada cambio queda en auditoría (NT_EDITAR: activo antes / después, PLU y motivo).
  */
-function nt_activar_masivo(PDO $pdo, array $ids, ?array $filtros, bool $activar, string $motivo, int $usuarioId): array {
+function nt_activar_masivo(PDO $pdo, array $claves, ?array $filtros, bool $activar, string $motivo, int $usuarioId): array {
     $motivo = trim($motivo);
     if ($motivo === '' || mb_strlen($motivo) > 300) throw new ErrorApi('Escriba el motivo (máximo 300 caracteres).', 422);
-    if ($filtros !== null) $ids = array_column(_nt_filtrar(nt_filas_por_plu(nt_calcular($pdo, true)['filas']), $filtros), 'id');
-    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
-    if (!$ids) throw new ErrorApi('No hay líneas seleccionadas.', 422);
-    if (count($ids) > 20000) throw new ErrorApi('Son demasiadas líneas para una sola operación.', 422);
+    $calc = nt_calcular($pdo, true)['filas'];
+    if ($filtros !== null) $claves = array_map(fn($f) => $f['id'] . '|' . ($f['plu'] ?? ''), _nt_filtrar(nt_filas_por_plu($calc), $filtros));
+    $porLinea = []; // id => [PLU => true] ('' = la línea completa)
+    foreach ($claves as $c) {
+        [$id, $plu] = array_pad(explode('|', (string) $c, 2), 2, '');
+        if ((int) $id > 0) $porLinea[(int) $id][_u($plu)] = true;
+    }
+    if (!$porLinea) throw new ErrorApi('No hay líneas seleccionadas.', 422);
+    if (array_sum(array_map('count', $porLinea)) > 20000) throw new ErrorApi('Son demasiadas líneas para una sola operación.', 422);
+    $plusDe = []; // PLU de cada línea (los de sus filas por PLU)
+    foreach ($calc as $f) $plusDe[(int) $f['id']] = array_map(fn($p) => _u((string) $p), array_column($f['_por_plu'] ?? [], 'plu'));
+    $inactivos = nt_plus_inactivos($pdo);
     $nuevo = $activar ? 1 : 0;
     $cambiadas = 0; $sinCambio = 0;
     $sel = $pdo->prepare('SELECT id, activo FROM nt_item WHERE id = ?');
     $upd = $pdo->prepare('UPDATE nt_item SET activo = ?, actualizado_en = ?, actualizado_por = ? WHERE id = ?');
-    foreach ($ids as $id) {
+    $borrar = $pdo->prepare('DELETE FROM nt_item_plu WHERE nt_item_id = ?');
+    foreach ($porLinea as $id => $elegidos) {
         $sel->execute([$id]); $a = $sel->fetch();
         if (!$a) continue;
-        if ((int) $a['activo'] === $nuevo) { $sinCambio++; continue; }
-        $upd->execute([$nuevo, ahora(), $usuarioId, $id]);
-        auditar($usuarioId, 'NT_EDITAR', 'nt_item', $id, ['activo' => (int) $a['activo']], ['activo' => $nuevo, 'motivo' => $motivo, 'masivo' => true]);
-        $cambiadas++;
+        $plus = $plusDe[$id] ?? [];
+        if (count($plus) <= 1 || isset($elegidos[''])) { // la línea completa: todos sus PLU quedan igual
+            if ((int) $a['activo'] === $nuevo && empty($inactivos[$id])) { $sinCambio++; continue; }
+            $upd->execute([$nuevo, ahora(), $usuarioId, $id]);
+            $borrar->execute([$id]);
+            auditar($usuarioId, 'NT_EDITAR', 'nt_item', $id, ['activo' => (int) $a['activo']], ['activo' => $nuevo, 'motivo' => $motivo, 'masivo' => true]);
+            $cambiadas++;
+            continue;
+        }
+        // por PLU: estado actual de cada PLU, cambio de los elegidos; la línea queda activa si le queda algún PLU activo
+        $estado = [];
+        foreach ($plus as $p) $estado[$p] = (int) $a['activo'] === 1 && !isset($inactivos[$id][$p]);
+        $antes = $estado;
+        foreach (array_keys($elegidos) as $p) if (isset($estado[$p])) $estado[$p] = (bool) $nuevo;
+        $cambio = array_keys(array_filter($estado, fn($v, $p) => $v !== $antes[$p], ARRAY_FILTER_USE_BOTH));
+        $sinCambio += count(array_intersect_key($elegidos, $estado)) - count($cambio);
+        if (!$cambio) continue;
+        $lineaActiva = in_array(true, $estado, true) ? 1 : 0;
+        if ($lineaActiva !== (int) $a['activo']) $upd->execute([$lineaActiva, ahora(), $usuarioId, $id]);
+        $borrar->execute([$id]);
+        if ($lineaActiva) foreach ($estado as $p => $v) {
+            if (!$v) insertar($pdo, 'nt_item_plu', ['nt_item_id' => $id, 'plu' => $p, 'activo' => 0, 'actualizado_por' => $usuarioId, 'actualizado_en' => ahora()]);
+        }
+        foreach ($cambio as $p) {
+            auditar($usuarioId, 'NT_EDITAR', 'nt_item', $id, ['activo' => (int) $antes[$p], 'plu' => $p],
+                ['activo' => $nuevo, 'plu' => $p, 'linea_activa' => $lineaActiva, 'motivo' => $motivo, 'masivo' => true]);
+            $cambiadas++;
+        }
     }
     nt_calcular($pdo, true); // recalcula con el nuevo estado
     return ['cambiadas' => $cambiadas, 'sin_cambio' => $sinCambio];
@@ -1124,6 +1186,7 @@ function nt_guardar(PDO $pdo, array $d, int $usuarioId): array {
         $sets = implode(', ', array_map(fn($k) => "$k = ?", array_keys($cambios)));
         $pdo->prepare("UPDATE nt_item SET $sets, actualizado_en = ?, actualizado_por = ? WHERE id = ?")
             ->execute([...array_values($cambios), ahora(), $usuarioId, $id]);
+        if (array_key_exists('activo', $cambios)) $pdo->prepare('DELETE FROM nt_item_plu WHERE nt_item_id = ?')->execute([$id]); // la línea completa: todos sus PLU
         auditar($usuarioId, 'NT_EDITAR', 'nt_item', $id, array_intersect_key($antes, $cambios), $cambios);
         return ['id' => $id, 'cambios' => count($cambios)];
     }
@@ -1310,7 +1373,7 @@ function nt_importar(PDO $pdo, string $ruta, string $nombre, int $usuarioId, boo
             $a = $actuales[$k]; $dif = [];
             foreach ($editables as $c) {
                 if ($f[$c] === null || $f[$c] === '') continue; // celda vacía: no cambia
-                if ($c === 'precio_venta' && ($calc[$k]['fuente_precio'] ?? 'DIGITADO') !== 'DIGITADO') continue; // 7F: sale de la fuente
+                if ($c === 'precio_venta' && ($calc[$k]['fuente_precio'] ?? 'DIGITADO') !== 'DIGITADO') continue; // 7F: CAPITA sale del Listado Cápita
                 $igual = is_numeric($f[$c]) && is_numeric($a[$c]) ? abs((float) $f[$c] - (float) $a[$c]) < 0.005 : _u((string) $f[$c]) === _u((string) $a[$c]);
                 if (!$igual) $dif[$c] = ['antes' => $a[$c], 'despues' => $f[$c]];
             }

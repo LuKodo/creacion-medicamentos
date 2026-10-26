@@ -1599,7 +1599,7 @@ async function pNota(c) {
     const pagina = () => [...document.querySelectorAll('.tabla-nt .sel-fila')];
     barraSel.replaceChildren(...[
       h('span', { class: `sel-n${n ? '' : ' sel-ayuda'}` }, n ? `${miles(n)} ${n === 1 ? 'línea seleccionada' : 'líneas seleccionadas'}${todasFiltradas ? ' (todas las filtradas)' : ''}` : 'Seleccione líneas con la casilla para activarlas o inactivarlas'),
-      h('button', { type: 'button', class: 'btn sec chico', onclick: () => { todasFiltradas = false; pagina().forEach((c) => { c.checked = true; seleccion.add(Number(c.dataset.id)); }); pintarSeleccion(); } }, 'Seleccionar esta página'),
+      h('button', { type: 'button', class: 'btn sec chico', onclick: () => { todasFiltradas = false; pagina().forEach((c) => { c.checked = true; seleccion.add(c.dataset.clave); }); pintarSeleccion(); } }, 'Seleccionar esta página'),
       h('button', { type: 'button', class: 'btn sec chico', onclick: () => { todasFiltradas = true; pagina().forEach((c) => { c.checked = true; }); pintarSeleccion(); } }, `Seleccionar las ${miles(totalFiltrado)} filtradas`),
       n ? h('button', { type: 'button', class: 'btn sec chico', onclick: () => { seleccion.clear(); todasFiltradas = false; pagina().forEach((c) => { c.checked = false; }); pintarSeleccion(); } }, 'Quitar selección') : null,
       h('span', { class: 'espacio' }),
@@ -1614,7 +1614,7 @@ async function pNota(c) {
     aceptar: activar ? 'Activar' : 'Inactivar',
     alEnviar: async (v) => {
       const r = await api('nt_activar_masivo', { metodo: 'POST', datos: { activar, motivo: v.motivo, todas_filtradas: todasFiltradas,
-        filtros: todasFiltradas ? tabla.filtros() : null, ids: todasFiltradas ? [] : [...seleccion].filter(Boolean) } });
+        filtros: todasFiltradas ? tabla.filtros() : null, filas: todasFiltradas ? [] : [...seleccion].filter(Boolean) } });
       toast(`${miles(r.cambiadas)} ${r.cambiadas === 1 ? 'línea' : 'líneas'} ${activar ? 'activadas' : 'inactivadas'}${r.sin_cambio ? ` · ${miles(r.sin_cambio)} ya estaban así` : ''}. Queda en auditoría.`);
       seleccion.clear(); todasFiltradas = false; tabla.refrescar();
     },
@@ -1631,8 +1631,10 @@ async function pNota(c) {
     const nt10 = f.motivos.some((m) => m.codigo === 'NT10');
     const extra = [nt10 ? ['Validar CUM a mano', () => validarCum(true), 'ok'] : null,
       f.cum_validado_en ? [`Retirar validación del CUM (${String(f.cum_validado_en).slice(0, 10)})`, () => validarCum(false), 'quitar'] : null].filter(Boolean);
-    const casilla = h('input', { type: 'checkbox', class: 'sel-fila', dataset: { id: f.id }, checked: seleccion.has(f.id), title: 'Seleccionar para activar / inactivar',
-      'aria-label': `Seleccionar ${f.cum_facturar}`, onchange: (ev) => { if (ev.target.checked) seleccion.add(f.id); else seleccion.delete(f.id); todasFiltradas = false; pintarSeleccion(); } });
+    // activar / inactivar por PLU + CONTRATO: cada fila es «id de la línea|PLU»
+    const clave = `${f.id}|${f.plu ?? ''}`;
+    const casilla = h('input', { type: 'checkbox', class: 'sel-fila', dataset: { clave }, checked: seleccion.has(clave), title: 'Seleccionar para activar / inactivar (este PLU en este contrato)',
+      'aria-label': `Seleccionar ${f.cum_facturar}${f.plu ? ` PLU ${f.plu}` : ''}`, onchange: (ev) => { if (ev.target.checked) seleccion.add(clave); else seleccion.delete(clave); todasFiltradas = false; pintarSeleccion(); } });
     return h('div', { class: 'acciones-fila' }, casilla,
       h('button', { type: 'button', class: 'btn-icono', title: 'Editar', 'aria-label': 'Editar', onclick: () => editarNT(f, () => tabla.refrescar()) }, svgIcono('editar')),
       extra.length ? h('details', { class: 'menu-exportar' }, h('summary', { class: 'btn-icono', title: 'Más acciones', 'aria-label': 'Más acciones' }, svgIcono('puntos')),
@@ -2000,13 +2002,14 @@ function editarNT(f, alGuardar, base = {}) {
     descripcion: txt(f.descripcion),
     cod_gen_siesa: txt(f.cod_gen_siesa),
     cod_mutual: txt(f.cod_mutual),
-    // 7F: con fuente (contrato, listado o regulado) el precio se calcula; solo se digita si la línea no tiene fuente
+    // 7F: en CAPITA el precio sale del Listado Cápita (con tope en el regulado); EVENTO y EVENTO SAS se digitan (el contrato es el tope)
     precio_venta: f.fuente_precio && f.fuente_precio !== 'DIGITADO' ? h('input', { type: 'number', value: f.precio_venta ?? '', readonly: true, class: 'solo-lectura', tabindex: -1 })
       : txt(f.precio_venta ?? '', { type: 'number', step: '0.01', min: '0' }),
     iva: sel(String(Number(f.iva) ? 0.19 : 0), [['0', '0 %'], ['0.19', '19 %']]),
   };
   const conFuente = !!f.fuente_precio && f.fuente_precio !== 'DIGITADO';
-  let activo = Number(f.activo) === 1;
+  // el interruptor es de la línea completa (todos sus PLU); el activar / inactivar por PLU se hace con la casilla de la tabla
+  let activo = Number(f.activo_linea ?? f.activo) === 1;
   const interruptor = h('button', { type: 'button', class: `interruptor${activo ? ' on' : ''}`, role: 'switch', 'aria-checked': String(activo), 'aria-label': 'Línea activa',
     onclick: () => { activo = !activo; interruptor.classList.toggle('on', activo); interruptor.setAttribute('aria-checked', String(activo)); estadoTxt.textContent = activo ? 'Activa' : 'Inactiva: no se valida ni se usa al crear productos'; } }, h('span', {}));
   const estadoTxt = h('span', { class: 'nota' }, activo ? 'Activa' : 'Inactiva: no se valida ni se usa al crear productos');
@@ -2035,10 +2038,12 @@ function editarNT(f, alGuardar, base = {}) {
         campo('cod_gen_siesa', 'COD GEN SIESA', c.cod_gen_siesa, 'Vacío: se toma del Maestro SIESA por el CUM.'),
         campo('cod_mutual', 'COD MUTUAL', c.cod_mutual, 'Con este código se valida el contrato y el precio.')),
       seccion(3, 'Precio y estado', campo('precio_venta', 'Precio de venta (sin IVA)', c.precio_venta, conFuente
-        ? `Calculado: ${({ 'LISTADO CAPITA': 'Listado Cápita', 'CONTRATO EVENTO': 'Contrato Evento', 'PRECIO REGULADO': 'tope del precio regulado' })[f.fuente_precio] || f.fuente_precio} ÷ (1 + IVA). No se digita.`
-        : 'Sin fuente (no está en el contrato ni en el listado): se usa el precio digitado.'), campo('iva', 'IVA', c.iva),
+        ? `Calculado: ${({ 'LISTADO CAPITA': 'Listado Cápita', 'PRECIO REGULADO': 'tope del precio regulado' })[f.fuente_precio] || f.fuente_precio} ÷ (1 + IVA). No se digita.`
+        : f.contrato === 'CAPITA' ? 'Sin tarifa en el Listado Cápita: se usa el precio digitado.'
+          : 'Precio propio de la línea: el Contrato Evento es el tope (si el precio final lo supera, GLOSA TARIFA).'), campo('iva', 'IVA', c.iva),
         h('label', {}, 'Precio final + IVA', final),
-        h('div', { class: 'campo-interruptor ancho-total' }, interruptor, h('strong', {}, 'Línea activa'), estadoTxt))),
+        h('div', { class: 'campo-interruptor ancho-total' }, interruptor, h('strong', {}, 'Línea activa'), estadoTxt,
+          f.plu_inactivo ? h('span', { class: 'nota' }, `El PLU ${f.plu} está inactivo en este contrato. Este interruptor cambia la línea completa (todos sus PLU).`) : null))),
     err,
     h('div', { class: 'form-pie' }, h('span', { class: 'espacio' }),
       h('button', { class: 'btn sec', value: 'cancelar', formnovalidate: true }, 'Cancelar'),

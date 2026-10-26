@@ -624,7 +624,8 @@ $acciones = [
         $u = requerir_permiso('NT.GESTIONAR');
         $in = entrada();
         $filtros = !empty($in['todas_filtradas']) ? (is_array($in['filtros'] ?? null) ? $in['filtros'] : []) : null;
-        return transaccion(fn() => nt_activar_masivo(db(), (array) ($in['ids'] ?? []), $filtros, !empty($in['activar']), (string) ($in['motivo'] ?? ''), $u['id']));
+        // filas = «id de la línea|PLU» (estado por PLU + CONTRATO)
+        return transaccion(fn() => nt_activar_masivo(db(), (array) ($in['filas'] ?? []), $filtros, !empty($in['activar']), (string) ($in['motivo'] ?? ''), $u['id']));
     }],
     'nt_guardar' => ['POST', function () {
         $u = requerir_permiso('NT.GESTIONAR');

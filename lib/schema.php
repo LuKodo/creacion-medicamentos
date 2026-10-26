@@ -407,6 +407,15 @@ function esquema_tablas(): array {
             datos TEXT,
             quitado_por INT NULL,
             quitado_en DATETIME NOT NULL",
+        // Estado por PLU + CONTRATO (pedido del usuario, 2026-10-26): una línea (CUM FACTURAR + contrato) con varios PLU de SIESA puede
+        // tener un PLU inactivo y otro activo. Solo se guardan los PLU inactivos de una línea activa; la línea inactiva inactiva todos.
+        'nt_item_plu' => "
+            id {PK},
+            nt_item_id INT NOT NULL,
+            plu VARCHAR(40) NOT NULL,
+            activo TINYINT NOT NULL DEFAULT 0,
+            actualizado_por INT NULL,
+            actualizado_en DATETIME NOT NULL",
         // Cambios de una versión de una base de referencia frente a la anterior (por la llave de la base):
         // NUEVO / RETIRADO (una fila por registro) y MODIFICADO (una fila por campo con antes y después).
         'ref_carga_cambio' => "
@@ -679,6 +688,7 @@ function esquema_indices(): array {
         ['idx_nti_auf',       'nt_item',           'cod_auf'],
         ['idx_ntc_item',      'nt_precio_calculo', 'nt_item_id'],
         ['idx_ntq_linea',     'nt_quitada',        'cum_facturar, contrato'],
+        ['idx_ntp_item',      'nt_item_plu',       'nt_item_id, plu'],
         ['idx_rcc_carga',     'ref_carga_cambio',  'carga_id'],
         ['idx_cor_estado',    'cor_inconsistencia','sistema, estado'],
         ['idx_cor_llave',     'cor_inconsistencia','llave'],

@@ -178,3 +178,22 @@ PRECIO.APROBAR_EXCEPCION, NT.GESTIONAR.
 | C1 | Código de presentación buscado por unidad de orden (fórmula AM): "CAJA SELLADA X 300" recibía el código de "CAJA X 300" | Se busca por presentación agrupada | Hallazgo fase 2 |
 | C2 | Laboratorios con dos códigos (6 casos) | Se conserva el primero, tal como estaba en el Excel | Usuario (fase 2) |
 | C3 | Código RIPS extraído tras el PRIMER guion | Se guarda el código directamente del catálogo | Hallazgo fase 2 |
+
+## Actualización 2026-10-26 — precio de la Maestra Tarifaria
+Archivos que cambian: `lib/nota_tecnica.php`, `lib/correcciones.php`, `lib/schema.php`, `lib/nt_publicacion.php`, `api.php`, `assets/app.js` y el nuevo
+`corregir_precios_20261026.php`. Tabla nueva `nt_item_plu`: después de desplegar, ejecutar `php actualizar_estructura.php`.
+- **EVENTO y EVENTO SAS:** se conserva el PRECIO DE VENTA propio de la línea; el Contrato Evento es solo el tope (si el precio M lo
+  supera, GLOSA TARIFA). Antes se tomaba el precio del contrato. **CAPITA:** sigue la tarifa del Listado Cápita, con tope en el regulado.
+- **Peso entero hacia abajo:** el precio que sale de la tarifa de cápita o del regulado no se redondea hacia arriba (807,89 → 807).
+- **Activar / inactivar por PLU + CONTRATO** (antes CUM + CONTRATO): en la Maestra Tarifaria cada fila es un PLU y la casilla cambia
+  solo ese PLU en ese contrato; la línea sigue activa mientras le quede un PLU activo. El interruptor del formulario cambia la línea
+  completa. Inconsistencias pide inactivar en SIESA / MEDICAR el PLU que se inactivó. `nt_version` incluye la tabla `nt_item_plu`.
+
+Cómo aplicarla en el servidor:
+1. Si **todavía no** se hizo el traslado: usar la base actualizada de `base_primera_version/` (ya trae la corrección de datos) y seguir
+   los pasos del traslado. No hace falta el script.
+2. Si **ya** se trasladó la base anterior (19-oct): desplegar el código, ejecutar `php actualizar_estructura.php` (crea `nt_item_plu`) y luego
+   `php corregir_precios_20261026.php` (revisión, no guarda)
+   y luego `php corregir_precios_20261026.php --confirmar`. Guarda antes una versión de la Maestra Tarifaria, deja todo en auditoría y se
+   puede re-ejecutar sin efecto. Resultado esperado sobre la base del 19-oct: 4.328 líneas corregidas y 5.260 inconsistencias de precio
+   MEDICAR falsas eliminadas (quedan 1.418 abiertas).
