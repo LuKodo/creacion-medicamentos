@@ -34,3 +34,6 @@ Thumbs.db
 
 # Delivered test database (not part of the image)
 base_primera_version/
+
+# Developer tooling (not part of the image)
+tools/

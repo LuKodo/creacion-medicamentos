@@ -197,3 +197,9 @@ Cómo aplicarla en el servidor:
    y luego `php corregir_precios_20261026.php --confirmar`. Guarda antes una versión de la Maestra Tarifaria, deja todo en auditoría y se
    puede re-ejecutar sin efecto. Resultado esperado sobre la base del 19-oct: 4.328 líneas corregidas y 5.260 inconsistencias de precio
    MEDICAR falsas eliminadas (quedan 1.418 abiertas).
+
+## Revisión de SQL antes de desplegar
+`python3 -I tools/auditar_sql.py` busca consultas con `JOIN` que usan una columna sin calificar (por ejemplo `ORDER BY id`) existente en
+más de una tabla: MySQL las rechaza con el error 1052 («Column 'id' in order clause is ambiguous») y la pantalla muestra «Error interno
+del servidor». Sale con código 1 si encuentra alguna. Solo revisa consultas escritas completas en una cadena; el SQL armado por partes
+se revisa a mano. En una consulta con `JOIN`, toda columna lleva su alias (`c.id`, `r.carga_id`).
