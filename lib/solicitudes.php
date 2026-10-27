@@ -188,7 +188,7 @@ function sol_autocompletar(PDO $pdo, string $codAuf, string $cum): array {
         $ci = _carga_vigente($pdo, 'INVIMA');
         $st = $pdo->prepare('SELECT c.cum, c.estado_cum, c.registro_sanitario, c.estado_registro, c.producto, c.titular, r.fecha_vencimiento
                                FROM ref_invima_cum c LEFT JOIN ref_invima_registro r ON r.carga_id = c.carga_id AND r.registro_sanitario = c.registro_sanitario
-                              WHERE c.carga_id = ? AND c.cum = ? ORDER BY id LIMIT 1');
+                              WHERE c.carga_id = ? AND c.cum = ? ORDER BY c.id LIMIT 1');
         $st->execute([$ci, $c]);
         $r['invima'] = $st->fetch() ?: null;
         $st = $pdo->prepare('SELECT id_mutual, codigo_atc, codigo_ium, nombre_comercial, medicamento FROM ref_medicamentos_mutual WHERE carga_id = ? AND cum = ? ORDER BY id LIMIT 1');
